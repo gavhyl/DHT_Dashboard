@@ -1,0 +1,89 @@
+SELECT TOP 200 --ClientKey
+Format(count(*),'N0') [Records], FORMAT(Sum(TotalAmountPaid),'C','en-US') [Paid]                                        
+FROM   WellpointEdwardRX.DBO.RXCLAIMS R (nolock)                                                 
+WHERE  R.TAPEID  in (154693, 154694, 154695, 154696, 154697, 154698, 154699, 154700) --[Add all Tapes from the delivery ticket]
+--GROUP BY CLIENTKEY  
+--Paid: $619,462,303.72
+--Count: 4,290,437
+
+--Data Auto-Snaps to DeliverFlow for Client. Run DHT in SSRS to review stats. Update ticket with the results above, certify all tapes & deliver ticket to DMG (Nick Reichert).
+
+-------------------------------------------------------
+
+----TRGCM9
+--SELECT [TapeID], [VolSerNum], [FileName], t.[FileTypeID], f.[FileType], [FileSize], [FileCreateDate], [FileDate], [ProcessStatusID], [DataDescription]
+--FROM [WellpointEdwardRx].[dbo].[tblTape] T (nolock)
+--JOIN [WellpointEdwardRx].[dbo].[tblFileType] F (nolock)
+--ON t.FileTypeID = f.FileTypeID
+--WHERE [Filename] like '%S5726%' --and f.FileTypeID not in (4,7)
+--ORDER BY TapeID desc
+
+--Contract  
+--H0544	BLUE CROSS OF CALIFORNIA
+--H0629	ANTHEM INSURANCE COMPANIES, INC.
+--H0907	WELLPOINT IOWA, INC.
+--H1212	WELLPOINT WEST VIRGINIA , INC.
+--H1423	WELLPOINT HEALTH PLANS, INC.
+--H1607	ANTHEM INSURANCE COMPANIES, INC.
+--H1894	WELLPOINT WASHINGTON, INC.
+--H1947	COMMUNITY CARE HEALTH PLAN OF LOUISIANA, INC.
+--H2441	ANTHEM INSURANCE COMPANIES, INC.
+--H2593	WELLPOINT TEXAS, INC.
+--H2628	COMMUNITY INSURANCE COMPANY
+--H2687	WELLPOINT SOUTH CAROLINA, INC.
+--H2836	ANTHEM HEALTH PLANS, INC.
+--H3240	WELLPOINT NEW JERSEY, INC.
+--H3447	HEALTHKEEPERS, INC.
+--H3536	MATTHEW THORNTON HEALTH PLAN, INC.
+--H3655	COMMUNITY INSURANCE COMPANY
+--H4003	MMM HEALTHCARE, LLC
+--H4004	MMM HEALTHCARE, LLC
+--H4036	ANTHEM INSURANCE COMPANIES, INC.
+--H4161	BLUE CROSS OF CALIFORNIA PARTNERSHIP PLAN, INC.
+--H4346	HMO COLORADO, INC.
+--H4471	BLUE CROSS OF CALIFORNIA PARTNERSHIP PLAN, INC.
+--H4694	HEALTHKEEPERS, INC.
+--H4704	ANTHEM BLUE CROSS LIFE AND HEALTH INS COMPANY
+--H4909	ANTHEM INSURANCE COMPANIES, INC.
+--H5422	BLUE CROSS BLUE SHIELD HEALTHCARE PLAN OF GEORGIA
+--H5427	FREEDOM HEALTH, INC.
+--H5431	HEALTHSUN HEALTH PLANS, INC.
+--H5471	SIMPLY HEALTHCARE PLANS, INC.
+--H5594	OPTIMUM HEALTHCARE, INC.
+--H5828	WELLPOINT TENNESSEE, INC.
+--H5854	ANTHEM HEALTH PLANS, INC.
+--H6078	Group Retiree Health Solutions, Inc.
+--H6316	MISSOURI CARE, INCORPORATED
+--H6988	Anthem HP, LLC
+--H7063	BLUECROSS BLUESHIELD KANSAS SOLUTIONS, INC.
+--H7093	COMMUNITY INSURANCE COMPANY
+--H7220	HealthKeepers, Inc.
+--H7522	MMM HEALTHCARE, LLC
+--H8432	ANTHEM HP, LLC.
+--H8552	ANTHEM BLUE CROSS LIFE AND HEALTH INS COMPANY
+--H8849	WELLPOINT INSURANCE COMPANY
+--H9065	AMH HEALTH, LLC
+--H9219	AMH HEALTH PLANS OF MAINE, INC.
+--H9525	COMPCARE HEALTH SERVICES INSURANCE CORPORATION
+--R5941	ANTHEM INSURANCE COMPANIES, INC.
+--S2893	ANTHEM INSURANCE CO. & BCBSMA & BCBSRI & BCBSVT
+--S5596	ANTHEM INSURANCE COMPANIES, INC.
+--S5726	BLUE CROSS AND BLUE SHIELD OF KANSAS
+--S5960	WELLPOINT LIFE AND HEALTH INSURANCE COMPANY
+
+-------------------------------------------------------
+
+--RESEARCH--
+
+--Select TapeID, FORMAT(Sum(AmountPaid),'C','en-US') [Paid], Format(count(*),'N0') [Records], 
+--sum(CASE when [SubscriberAddressLine1] is NULL THEN 1 ELSE 0 END) [NULL_Address]
+--from WellpointEdwardRX.dbo.vwClaimHistory
+--where TapeId >= 147267
+--group by TapeID
+--order by TapeID
+
+--Select TapeID, Year(DatePaid) [Year], Month(DatePaid) [Month], '$' + FORMAT(SUM(AmountPaid), 'N0', 'en-US') [Paid], Format(count(*),'N0') [Records]
+--from WellpointEdwardRX.dbo.vwClaimHistory
+--where TapeId in (145989,146007,148372)
+--group by TapeID, Year(DatePaid), Month(DatePaid)
+--order by TapeID, Year(DatePaid), Month(DatePaid)

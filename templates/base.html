@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" data-bs-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}DHT Dashboard{% endblock %}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .navbar-brand { font-weight: 600; letter-spacing: .03em; }
+        .badge-pharmacy { background-color: #6f42c1; }
+        .table th { white-space: nowrap; }
+        .zscore-extreme { color: #ff6b6b; font-weight: 600; }
+        .zscore-warn    { color: #ffa94d; font-weight: 600; }
+        .zscore-ok      { color: #51cf66; }
+        .badge-orange   { background-color: #fd7e14; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-dark bg-dark mb-4">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">&#9679; DHT Dashboard</a>
+        </div>
+    </nav>
+    <div class="container-fluid px-4">
+        {% block content %}{% endblock %}
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

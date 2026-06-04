@@ -1,0 +1,557 @@
+{% extends "base.html" %}
+{% block title %}{{ cert.DatabaseName }} — Cert {{ cert.CertID }}{% endblock %}
+
+{% block content %}
+
+{# ── Success / error banners ── #}
+{% if request.args.get('added') %}
+<div class="alert alert-success alert-dismissible fade show py-2" role="alert">
+    Comment added successfully.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+{% if request.args.get('error') == 'comment_required' %}
+<div class="alert alert-danger alert-dismissible fade show py-2" role="alert">
+    Comment text is required.
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
+{# ── Header ── #}
+<div class="d-flex align-items-center gap-2 mb-3">
+    <a href="/?client={{ back_client }}" class="btn btn-sm btn-outline-secondary">&larr; Back</a>
+    <h5 class="mb-0">{{ cert.DatabaseName }}</h5>
+    {% if ramp_ticket and ramp_ticket.QueueId %}
+    <a href="http://ramp/Ramp/Dashboard/{{ ramp_ticket.QueueId }}" target="_blank" rel="noopener"
+       class="btn btn-sm btn-outline-primary" title="{{ ramp_ticket.JobName }}">Open in RAMP</a>
+    {% endif %}
+    {% if cert.isPharmacy == '1' %}
+        <span class="badge badge-pharmacy text-white">Pharmacy</span>
+    {% else %}
+        <span class="badge bg-secondary">Medical</span>
+    {% endif %}
+    {% if cert.AuditTargetNotificationFlag %}<span class="badge bg-info text-dark">Audit</span>{% endif %}
+    {% if cert.SubroTargetNotificationFlag %}<span class="badge bg-warning text-dark">Subro</span>{% endif %}
+    {% if cert.RxTargetNotificationFlag %}<span class="badge bg-success">Rx</span>{% endif %}
+</div>
+
+<div class="row g-2 mb-4">
+    <div class="col-auto">
+        <div class="card text-center px-3 py-2">
+            <small class="text-muted">Cert ID</small>
+            <div class="fw-bold">{{ cert.CertID }}</div>
+        </div>
+    </div>
+    <div class="col-auto">
+        <div class="card text-center px-3 py-2">
+            <small class="text-muted">Level</small>
+            <div class="fw-bold">{{ cert.CertLevel }}</div>
+        </div>
+    </div>
+    <div class="col-auto">
+        <div class="card text-center px-3 py-2">
+            <small class="text-muted">Alert Time</small>
+            <div class="fw-bold">{{ cert.AlertTimestamp.strftime('%Y-%m-%d %H:%M') if cert.AlertTimestamp else '—' }}</div>
+        </div>
+    </div>
+    <div class="col-auto">
+        <div class="card text-center px-3 py-2 {{ 'border-danger' if cert.ThresholdCount and cert.ThresholdCount > 0 else 'border-success' }}">
+            <small class="text-muted">Threshold Hits</small>
+            <div class="fw-bold {{ 'text-danger' if cert.ThresholdCount and cert.ThresholdCount > 0 else 'text-success' }}">
+                {{ cert.ThresholdCount or 0 }}
+            </div>
+        </div>
+    </div>
+    <div class="col-auto">
+        <div class="card text-center px-3 py-2 {{ 'border-danger' if issues else 'border-success' }}">
+            <small class="text-muted">Validation Issues</small>
+            <div class="fw-bold {{ 'text-danger' if issues else 'text-success' }}">{{ issues | length }}</div>
+        </div>
+    </div>
+    {% if cert.Comment %}
+    <div class="col">
+        <div class="card px-3 py-2 h-100">
+            <small class="text-muted">Cert Comment</small>
+            <div>{{ cert.Comment }}</div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+
+{# ── Backsweep banner ── #}
+{% if backsweep_files %}
+<div class="alert alert-warning py-2 mb-3">
+    <div class="fw-semibold mb-1">
+        &#9888; Potential backsweep file{{ 's' if backsweep_files | length > 1 else '' }} detected
+        ({{ backsweep_files | length }})
+    </div>
+    <table class="table table-sm table-borderless mb-0 small bg-transparent">
+        <thead class="text-muted">
+            <tr>
+                <th class="fw-normal py-0">File</th>
+                <th class="fw-normal py-0 text-end">Size</th>
+                <th class="fw-normal py-0">Tape</th>
+                <th class="fw-normal py-0">Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in backsweep_files %}
+            <tr>
+                <td class="font-monospace py-0">{{ f.FileName }}</td>
+                <td class="font-monospace py-0 text-end">
+                    {{ '%.2f GB' | format(f.Size / 1e9) if f.Size else '—' }}
+                </td>
+                <td class="font-monospace py-0">{{ f.TapeID or '—' }}</td>
+                <td class="py-0">{{ f.Reasons | join(', ') }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ── Analysis panel ── #}
+<div class="mb-3">
+    <button class="btn btn-sm btn-outline-primary" id="analyzeBtn" onclick="runAnalysis()">
+        Analyze
+    </button>
+    <div id="analysisResult" class="mt-2" style="display:none">
+        <span id="analysisVerdict" class="badge fs-6 me-2"></span>
+        <button class="btn btn-link btn-sm p-0 align-baseline" type="button"
+                data-bs-toggle="collapse" data-bs-target="#analysisInsights">
+            Details
+        </button>
+        <div class="collapse mt-1" id="analysisInsights">
+            <div class="card card-body py-2 small text-muted" style="max-width:640px"
+                 id="analysisText"></div>
+        </div>
+    </div>
+</div>
+
+{# ── Tabs ── #}
+<ul class="nav nav-tabs mb-3" id="certTabs" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-files">
+            Files <span class="badge bg-secondary">{{ tables | length }}</span>
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link {{ 'text-danger' if issues }}" data-bs-toggle="tab" data-bs-target="#tab-issues">
+            Validation Issues
+            {% if issues %}
+                <span class="badge bg-danger">{{ issues | length }}</span>
+            {% else %}
+                <span class="badge bg-success">0</span>
+            {% endif %}
+        </button>
+    </li>
+    {% if fl_cols is not none or fl_error %}
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-fileloads">
+            File Loads
+            {% if fl_error %}
+                <span class="badge bg-danger" title="{{ fl_error }}">!</span>
+            {% else %}
+                <span class="badge bg-secondary">{{ fl_rows | length }}</span>
+            {% endif %}
+        </button>
+    </li>
+    {% endif %}
+    {% if cert.isPharmacy == '1' %}
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-rxverify">
+            Rx Verification
+            {% if rx_error %}
+                <span class="badge bg-danger" title="{{ rx_error }}">!</span>
+            {% elif rx_tapes %}
+                <span class="badge bg-success">&#10003;</span>
+            {% endif %}
+        </button>
+    </li>
+    {% endif %}
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-comments">
+            Comments <span class="badge bg-secondary">{{ comments | length }}</span>
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+
+    {# ── Files tab ── #}
+    <div class="tab-pane fade show active" id="tab-files">
+        {% if tables %}
+        <div class="table-responsive">
+        <table class="table table-sm table-bordered small">
+            <thead class="table-secondary">
+                <tr>
+                    <th>Table / View</th>
+                    <th>PCN</th>
+                    <th>Tape ID</th>
+                    <th>File Type</th>
+                    <th>Status</th>
+                    <th>Stat Timestamp</th>
+                    <th>Validation Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for t in tables %}
+                <tr class="{{ 'table-warning' if t.CurrentStatus and 'exception' in t.CurrentStatus.lower() }}">
+                    <td>{{ t.Name }}</td>
+                    <td>{{ t.PCN or '—' }}</td>
+                    <td>{{ t.TapeID or '—' }}</td>
+                    <td>{{ t.FileTypeID or '—' }}</td>
+                    <td>
+                        {% if t.CurrentStatus and 'certified' in t.CurrentStatus.lower() %}
+                            <span class="text-success">{{ t.CurrentStatus }}</span>
+                        {% elif t.CurrentStatus and 'exception' in t.CurrentStatus.lower() %}
+                            <span class="text-danger">{{ t.CurrentStatus }}</span>
+                        {% else %}
+                            {{ t.CurrentStatus or '—' }}
+                        {% endif %}
+                    </td>
+                    <td>{{ t.StatTimestamp.strftime('%Y-%m-%d %H:%M') if t.StatTimestamp else '—' }}</td>
+                    <td>{{ t.ValidationTimestamp.strftime('%Y-%m-%d %H:%M') if t.ValidationTimestamp else '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="alert alert-secondary">No file entries found for this certification.</div>
+        {% endif %}
+    </div>
+
+    {# ── Validation Issues tab ── #}
+    <div class="tab-pane fade" id="tab-issues">
+        <div class="d-flex flex-wrap gap-3 mb-3 small align-items-center">
+            <span class="text-muted fw-semibold">Determination:</span>
+            <span><span class="badge bg-danger me-1">-2</span>Severe Risk</span>
+            <span><span class="badge badge-orange text-white me-1">-1</span>High Risk</span>
+            <span><span class="badge bg-secondary me-1">0</span>Normal</span>
+            <span><span class="badge bg-success me-1">1</span>Low Risk</span>
+            <span><span class="badge bg-primary me-1">2</span>Potential Risk</span>
+        </div>
+        {% if issues %}
+        <div class="table-responsive">
+        <table class="table table-sm table-bordered small">
+            <thead class="table-secondary">
+                <tr>
+                    <th>Field</th>
+                    <th>Level</th>
+                    <th>Set</th>
+                    <th>File Type</th>
+                    <th class="text-end">Z-Score</th>
+                    <th class="text-end">Value</th>
+                    <th class="text-end">% of Records</th>
+                    <th class="text-end">Hist. Avg %</th>
+                    <th class="text-end">Hist. StdDev</th>
+                    <th class="text-center">Determination</th>
+                    <th>Comment</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in issues %}
+                {% set abs_z = v.ZScore | abs if v.ZScore else 0 %}
+                <tr>
+                    <td class="fw-semibold">{{ v.FieldName }}</td>
+                    <td>{{ v.ValidationLevel }}</td>
+                    <td>{{ v.ValidationSet }}</td>
+                    <td>{{ v.FileTypeID or '—' }}</td>
+                    <td class="text-end
+                        {%- if abs_z >= 3 %} zscore-extreme
+                        {%- elif abs_z >= 2 %} zscore-warn
+                        {%- else %} zscore-ok{% endif %}">
+                        {{ '%.4f' | format(v.ZScore) if v.ZScore is not none else '—' }}
+                    </td>
+                    <td class="text-end">{{ v.Value or '—' }}</td>
+                    <td class="text-end">
+                        {{ '%.4f%%' | format(v.Percentage * 100) if v.Percentage is not none else '—' }}
+                    </td>
+                    <td class="text-end">
+                        {{ '%.4f%%' | format(v.ValidationAverage * 100) if v.ValidationAverage is not none else '—' }}
+                    </td>
+                    <td class="text-end">
+                        {{ '%.6f' | format(v.ValidationDeviation) if v.ValidationDeviation is not none else '—' }}
+                    </td>
+                    <td class="text-center">
+                        {% if v.Determination == -2 %}
+                            <span class="badge bg-danger">Red</span>
+                        {% elif v.Determination == -1 %}
+                            <span class="badge badge-orange text-white">Orange</span>
+                        {% elif v.Determination == 1 %}
+                            <span class="badge bg-success">Green</span>
+                        {% elif v.Determination == 2 %}
+                            <span class="badge bg-primary">Blue</span>
+                        {% else %}
+                            <span class="badge bg-secondary">{{ v.Determination }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="text-muted">{{ v.Comment or '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="alert alert-success">&#10003; No validation issues — all fields within thresholds.</div>
+        {% endif %}
+    </div>
+
+    {# ── File Loads tab ── #}
+    {% if fl_cols is not none or fl_error %}
+    <div class="tab-pane fade" id="tab-fileloads">
+        {% if fl_error %}
+            <div class="alert alert-danger">
+                <strong>Could not load file data.</strong> {{ fl_error }}
+            </div>
+        {% elif fl_rows %}
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <input type="text" id="flFilter" class="form-control form-control-sm w-auto"
+                   placeholder="Filter by file name, type, status…" style="min-width:260px">
+            <span class="text-muted small">{{ fl_rows | length }} record(s) — last 14 days</span>
+        </div>
+        <div class="table-responsive">
+        <table class="table table-sm table-bordered small" id="flTable">
+            <thead class="table-secondary">
+                <tr>
+                    {% for col in fl_cols %}
+                    <th>{{ col }}</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in fl_rows %}
+                <tr>
+                    {% for col in fl_cols %}
+                    <td>{{ row[col] if row[col] is not none else '—' }}</td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        <script>
+        document.getElementById('flFilter').addEventListener('input', function () {
+            var val = this.value.toLowerCase();
+            document.querySelectorAll('#flTable tbody tr').forEach(function (row) {
+                row.style.display = row.textContent.toLowerCase().includes(val) ? '' : 'none';
+            });
+        });
+        </script>
+        {% else %}
+            <div class="alert alert-secondary">No file load records in the last 14 days.</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Rx Verification tab (pharmacy only) ── #}
+    {% if cert.isPharmacy == '1' %}
+    <div class="tab-pane fade" id="tab-rxverify">
+        {% if rx_error %}
+            <div class="alert alert-danger"><strong>Error:</strong> {{ rx_error }}</div>
+        {% elif not rx_tapes %}
+            <div class="alert alert-secondary">No Rx verification query configured for {{ cert.DatabaseName }}.</div>
+        {% else %}
+            <div class="table-responsive">
+            <table class="table table-sm table-bordered small">
+                <thead class="table-secondary">
+                    <tr>
+                        <th>Tape ID</th>
+                        {% if rx_has_claim %}
+                        <th class="text-end">Claim Paid</th>
+                        <th class="text-end">Claim Records</th>
+                        {% endif %}
+                        <th class="text-end">Mining Paid</th>
+                        <th class="text-end">Mining Records</th>
+                        {% if rx_has_claim %}<th class="text-center">Match</th>{% endif %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for tape in rx_tapes %}
+                    <tr>
+                        <td class="font-monospace">{{ tape.TapeID }}</td>
+                        {% if rx_has_claim %}
+                        <td class="text-end font-monospace">{{ tape.claim_paid or '—' }}</td>
+                        <td class="text-end font-monospace">{{ tape.claim_records or '—' }}</td>
+                        {% endif %}
+                        <td class="text-end font-monospace">{{ tape.mining_paid or '—' }}</td>
+                        <td class="text-end font-monospace">{{ tape.mining_records or '—' }}</td>
+                        {% if rx_has_claim %}
+                        <td class="text-center">
+                            {% if tape.match %}
+                                <span class="text-success fw-bold">&#10003;</span>
+                            {% elif tape.claim_paid and tape.mining_paid %}
+                                <span class="text-warning fw-bold">&#9888;</span>
+                            {% else %}
+                                <span class="text-muted">—</span>
+                            {% endif %}
+                        </td>
+                        {% endif %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {# ── Comments tab ── #}
+    <div class="tab-pane fade" id="tab-comments">
+        {% if comments %}
+        <div class="table-responsive">
+        <table class="table table-sm table-bordered small">
+            <thead class="table-secondary">
+                <tr>
+                    <th>Date</th>
+                    <th>Category</th>
+                    <th>TFS / ADO</th>
+                    <th>PCN</th>
+                    <th>Tape ID</th>
+                    <th>Comment</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in comments %}
+                <tr>
+                    <td>{{ c.TimeStamp.strftime('%Y-%m-%d %H:%M') if c.TimeStamp else '—' }}</td>
+                    <td>{{ c.Category or '—' }}</td>
+                    <td>{{ c.TFS or '—' }}</td>
+                    <td>{{ c.PCN or '—' }}</td>
+                    <td>{{ c.TapeID or '—' }}</td>
+                    <td>{{ c.Comment or '' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+        {% else %}
+        <div class="alert alert-secondary">No comments on record for {{ cert.DatabaseName }}.</div>
+        {% endif %}
+        <div class="mt-3">
+            <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#commentModal">
+                + Add Comment
+            </button>
+        </div>
+    </div>
+
+</div>
+
+{# ── Add Comment Modal ── #}
+{% set distinct_pcns = tables | map(attribute='PCN') | select | unique | list %}
+{% set distinct_tapes = tables | map(attribute='TapeID') | select | unique | list %}
+
+<div class="modal fade" id="commentModal" tabindex="-1" aria-labelledby="commentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="post" action="/cert/{{ cert.CertID }}/comment">
+                <div class="modal-header">
+                    <h6 class="modal-title" id="commentModalLabel">Add Comment — {{ cert.DatabaseName }}</h6>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+
+                    <div class="mb-3">
+                        <label class="form-label">Category</label>
+                        <input type="text" class="form-control form-control-sm" name="category"
+                               list="categoryOptions" placeholder="Select or type a category">
+                        <datalist id="categoryOptions">
+                            <option value="Claims">
+                            <option value="Eligibility">
+                            <option value="Pharmacy">
+                            <option value="MiningCachePull">
+                            <option value="Group">
+                            <option value="Provider">
+                            <option value="Other">
+                        </datalist>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col">
+                            <label class="form-label">PCN <span class="text-muted small">(optional)</span></label>
+                            <select class="form-select form-select-sm" name="pcn">
+                                <option value="">— none —</option>
+                                {% for pcn in distinct_pcns %}
+                                <option value="{{ pcn }}">{{ pcn }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col">
+                            <label class="form-label">Tape ID <span class="text-muted small">(optional)</span></label>
+                            <select class="form-select form-select-sm" name="tape_id">
+                                <option value="">— none —</option>
+                                {% for tid in distinct_tapes %}
+                                <option value="{{ tid }}">{{ tid }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">ADO / TFS Ticket <span class="text-muted small">(optional)</span></label>
+                        <input type="text" class="form-control form-control-sm" name="tfs"
+                               placeholder="e.g. 950937">
+                    </div>
+
+                    <div class="mb-1">
+                        <label class="form-label">Comment <span class="text-danger">*</span></label>
+                        <textarea class="form-control form-control-sm" name="comment" rows="4"
+                                  placeholder="Describe the exception or note..." required></textarea>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-sm btn-outline-secondary"
+                            data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-sm btn-primary">Save Comment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var hash = window.location.hash;
+    var params = new URLSearchParams(window.location.search);
+    var target = hash || (params.get('added') ? '#tab-comments' : null);
+    if (target) {
+        var btn = document.querySelector('[data-bs-target="' + target + '"]');
+        if (btn) bootstrap.Tab.getOrCreateInstance(btn).show();
+    }
+})();
+
+function runAnalysis() {
+    var btn = document.getElementById('analyzeBtn');
+    btn.disabled = true;
+    btn.textContent = 'Analyzing…';
+    fetch('/cert/{{ cert.CertID }}/analysis', {method: 'POST'})
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var result = document.getElementById('analysisResult');
+            result.style.display = '';
+            if (data.error) {
+                result.innerHTML = '<div class="alert alert-danger small py-2">' + data.error + '</div>';
+                btn.disabled = false;
+                btn.textContent = 'Analyze';
+                return;
+            }
+            btn.style.display = 'none';
+            var badge = document.getElementById('analysisVerdict');
+            if (data.verdict === 'READY') {
+                badge.textContent = 'Ready to deliver';
+                badge.className = 'badge bg-success fs-6 me-2';
+            } else {
+                badge.textContent = 'Manual review needed';
+                badge.className = 'badge bg-warning text-dark fs-6 me-2';
+            }
+            document.getElementById('analysisText').textContent = data.insights;
+        })
+        .catch(function () {
+            btn.disabled = false;
+            btn.textContent = 'Analyze';
+        });
+}
+</script>
+{% endblock %}

@@ -1,0 +1,542 @@
+{% extends "base.html" %}
+{% block title %}DHT Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-5 col-lg-4">
+        <form method="get" action="/">
+            <label class="form-label fw-semibold" for="clientSelect">Select Client</label>
+            <div class="input-group">
+                <select class="form-select" id="clientSelect" name="client"
+                        onchange="this.form.submit()">
+                    <option value="" {% if not selected %}selected{% endif %} disabled>
+                        — choose a client —
+                    </option>
+                    {% for name in clients %}
+                    <option value="{{ name }}" {% if name == selected %}selected{% endif %}>
+                        {{ name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if selected %}
+                <a href="/" class="btn btn-outline-secondary" title="Clear">&#x2715;</a>
+                {% endif %}
+            </div>
+            <div class="form-text">{{ clients | length }} client(s) with certs in the last 60 days.</div>
+        </form>
+    </div>
+</div>
+
+{% if selected %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h6 class="mb-0">
+        {{ selected }}
+        <span class="badge bg-secondary ms-1">{{ (pending_certs | length) + (certified_certs | length) }} cert(s)</span>
+    </h6>
+    <a href="/?client={{ selected }}" class="btn btn-sm btn-outline-secondary">&#8635; Refresh</a>
+</div>
+
+{# ── Kaiser Weekly Delivery panel ── #}
+{% if kaiser_matrix %}
+{% set km = kaiser_matrix %}
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <span class="fw-semibold">Kaiser Weekly Delivery</span>
+            <span class="text-muted small ms-2">
+                {{ km.start.strftime('%a %Y-%m-%d') }} &rarr; {{ km.anchor_wed.strftime('%a %Y-%m-%d') }}
+                <span class="ms-1">(snap {{ km.anchor_wed.strftime('%Y-%m-%d') }} / deliver {{ km.deliver_thu.strftime('%Y-%m-%d') }})</span>
+            </span>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            {% if kaiser_ticket %}
+                <a href="https://devops.ado.rawlingslou.prod/TFS2012/Rawlings/_workitems/edit/{{ kaiser_ticket.TfsId }}"
+                   target="_blank" rel="noopener"
+                   class="badge bg-primary text-decoration-none"
+                   title="{{ kaiser_ticket.Title }} — {{ kaiser_ticket.State }}">
+                    #{{ kaiser_ticket.TfsId }}
+                    <span class="badge bg-light text-dark ms-1">{{ kaiser_ticket.State }}</span>
+                </a>
+            {% else %}
+                <span class="badge bg-secondary" title="No Kaiser - SNAP/MINE ticket found in ADO">No ticket yet</span>
+            {% endif %}
+            <button id="kaiserAnalyzeBtn" class="btn btn-sm btn-primary"
+                    onclick="runKaiserAnalysis()" disabled>
+                Analyze All Loaded
+            </button>
+        </div>
+    </div>
+    <div class="table-responsive">
+    <table class="table table-bordered align-middle small mb-0 kaiser-matrix">
+        <thead class="table-dark">
+            <tr>
+                <th style="min-width:160px">Feed</th>
+                {% for d in km.days %}
+                <th class="text-center" style="min-width:130px">
+                    {{ d.strftime('%a') }}<br>
+                    <span class="text-muted">{{ d.strftime('%m-%d') }}</span>
+                </th>
+                {% endfor %}
+            </tr>
+        </thead>
+        <tbody>
+            {% macro feed_row(feed) %}
+            <tr>
+                <td class="fw-semibold">{{ feed.DatabaseName }}</td>
+                {% for d in km.days %}
+                {% set load = feed.loads_by_date.get(d) %}
+                <td class="text-center">
+                    {% if load %}
+                        <div>
+                            <a href="/cert/{{ load.CertID }}" class="text-decoration-none fw-semibold">
+                                #{{ load.CertID }}
+                            </a>
+                            {% if load.ThresholdCount and load.ThresholdCount > 0 %}
+                                <span class="badge bg-danger ms-1" title="Threshold hits">{{ load.ThresholdCount }}</span>
+                            {% endif %}
+                        </div>
+                        <div class="small {% if load.TrustScoreZ is not none and load.TrustScoreZ > 1 %}text-danger fw-bold{% else %}text-muted{% endif %}"
+                             title="Trust Score z-score (red when > 1)">
+                            TSz:
+                            {% if load.TrustScoreZ is none %}—
+                            {% else %}{{ '%.2f' | format(load.TrustScoreZ) }}{% endif %}
+                        </div>
+                        <div class="small {% if load.DuplicateLineKey is not none and load.DuplicateLineKey > 1 %}text-danger fw-bold{% else %}text-muted{% endif %}">
+                            Dup:
+                            {% if load.DuplicateLineKey is none %}—
+                            {% else %}{{ '%.0f' | format(load.DuplicateLineKey) }}{% endif %}
+                        </div>
+                        <div class="kaiser-verdict-slot" data-cert-id="{{ load.CertID }}">
+                            {% if load.CurrentStatus == 'Certified' %}
+                                <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle">Certified</span>
+                            {% endif %}
+                        </div>
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+                {% endfor %}
+            </tr>
+            {% endmacro %}
+
+            {% for feed in km.weekly_feeds %}{{ feed_row(feed) }}{% endfor %}
+
+            {% if km.ambulance_feeds %}
+            <tr class="table-secondary">
+                <td colspan="{{ km.days | length + 1 }}" class="small fw-semibold">
+                    Monthly Ambulance feeds — loads detected this cycle
+                </td>
+            </tr>
+            {% for feed in km.ambulance_feeds %}{{ feed_row(feed) }}{% endfor %}
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+    <div class="card-footer small text-muted">
+        Trust Score z-score (TSz) and Duplicate Line Key (Dup) flagged red when &gt; 1.
+        Click <em>Analyze All Loaded</em> to run the verdict pipeline on every cell with a cert.
+    </div>
+</div>
+{% endif %}
+
+{# ── Kaiser Paid Date Coverage panel ── #}
+{% if kaiser_coverage %}
+<style>
+  .coverage-cell {
+    width: 18px; height: 18px; border-radius: 2px;
+    display: inline-block; flex-shrink: 0;
+  }
+  .coverage-covered { background-color: var(--bs-success); }
+  .coverage-gap     { background-color: var(--bs-danger); }
+  .coverage-future  { background-color: var(--bs-secondary); opacity: 0.35; }
+</style>
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <span class="fw-semibold">Paid Date Coverage</span>
+            <span class="text-muted small ms-2">
+                last {{ kaiser_coverage.lookback_days }} days &middot; as of {{ kaiser_coverage.today.strftime('%Y-%m-%d') }}
+            </span>
+        </div>
+    </div>
+    <div class="table-responsive">
+    <table class="table table-bordered align-middle small mb-0">
+        <thead class="table-dark">
+            <tr>
+                <th style="min-width:160px">Feed</th>
+                <th class="text-center" style="min-width:100px">Latest Paid</th>
+                <th class="text-center" style="min-width:60px">Lag</th>
+                <th style="min-width:380px">Coverage</th>
+                <th>Gaps</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for feed in kaiser_coverage.feeds %}
+            <tr>
+                <td class="fw-semibold">{{ feed.DatabaseName }}</td>
+                <td class="text-center">
+                    {% if feed.latest_paid_date %}{{ feed.latest_paid_date.strftime('%m-%d') }}{% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td class="text-center {% if feed.lag_days is not none and feed.lag_days > 14 %}text-warning fw-bold{% endif %}">
+                    {% if feed.lag_days is not none %}{{ feed.lag_days }}d{% else %}<span class="text-muted">—</span>{% endif %}
+                </td>
+                <td>
+                    <div class="d-flex gap-1 align-items-center">
+                        {% for cell in feed.strip %}
+                            <span class="coverage-cell coverage-{{ cell.status }}"
+                                  title="{{ cell.date.strftime('%a %Y-%m-%d') }}{% if cell.status == 'covered' %} · {{ cell.file_count }} file(s){% elif cell.status == 'gap' %} · MISSING{% else %} · expected lag{% endif %}"></span>
+                        {% endfor %}
+                    </div>
+                </td>
+                <td class="small">
+                    {% if feed.gap_dates %}
+                        {% for d in feed.gap_dates %}
+                            <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle me-1">{{ d.strftime('%m-%d') }}</span>
+                        {% endfor %}
+                    {% else %}
+                        <span class="text-muted">—</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <div class="card-footer small text-muted">
+        <span class="coverage-cell coverage-covered align-middle"></span> Covered
+        <span class="coverage-cell coverage-gap align-middle ms-3"></span> Gap (in-range, no files for that paid date)
+        <span class="coverage-cell coverage-future align-middle ms-3"></span> Expected lag (newer than latest covered paid date)
+    </div>
+</div>
+{% endif %}
+
+{% macro cert_table(rows, selectable=False) %}
+<div class="table-responsive">
+<table class="table table-hover table-bordered align-middle small">
+    <thead class="table-dark">
+        <tr>
+            {% if selectable %}
+            <th class="text-center" style="width:1%">
+                <input type="checkbox" id="selectAllCerts" class="form-check-input"
+                       onchange="toggleAllCerts(this.checked)" title="Select / deselect all">
+            </th>
+            {% endif %}
+            <th>Cert ID</th>
+            <th>Level</th>
+            <th>Alert Time</th>
+            <th>Claims File</th>
+            <th>PCN(s)</th>
+            <th class="text-center">Threshold Hits</th>
+            <th class="text-center">Delivery Ticket</th>
+            <th class="text-center">Type</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in rows %}
+        <tr>
+            {% if selectable %}
+            <td class="text-center">
+                <input type="checkbox" name="cert-select" class="form-check-input cert-checkbox"
+                       value="{{ c.CertID }}"
+                       data-alert="{{ c.AlertTimestamp.isoformat() if c.AlertTimestamp else '' }}"
+                       onchange="updateAnalyzeButton()">
+            </td>
+            {% endif %}
+            <td>
+                <a href="/cert/{{ c.CertID }}" class="fw-semibold text-decoration-none">
+                    {{ c.CertID }}
+                </a>
+            </td>
+            <td>{{ c.CertLevel }}</td>
+            <td>{{ c.AlertTimestamp.strftime('%Y-%m-%d %H:%M') if c.AlertTimestamp else '—' }}</td>
+            <td>
+                {% for name in c.claim_names %}
+                    <div class="small">{{ name }}</div>
+                {% else %}
+                    <span class="text-muted">—</span>
+                {% endfor %}
+            </td>
+            <td>
+                {% for pcn in c.pcns %}
+                    <span class="badge bg-body-secondary text-body border me-1">{{ pcn }}</span>
+                {% else %}
+                    <span class="text-muted">—</span>
+                {% endfor %}
+            </td>
+            <td class="text-center
+                {%- if c.ThresholdCount and c.ThresholdCount > 0 %} text-danger fw-bold
+                {%- else %} text-success{% endif %}">
+                {{ c.ThresholdCount or 0 }}
+            </td>
+            <td class="text-center">
+                {% if c.ramp_ticket %}
+                    <a href="https://devops.ado.rawlingslou.prod/TFS2012/Rawlings/_workitems/edit/{{ c.ramp_ticket.TfsId }}"
+                       target="_blank" rel="noopener"
+                       class="badge bg-primary text-decoration-none"
+                       title="{{ c.ramp_ticket.JobName }}">
+                        #{{ c.ramp_ticket.TfsId }}
+                    </a>
+                {% else %}
+                    <span class="text-muted">—</span>
+                {% endif %}
+            </td>
+            <td class="text-center">
+                {% if c.isPharmacy == '1' %}
+                    <span class="badge badge-pharmacy text-white">Pharmacy</span>
+                {% else %}
+                    <span class="badge bg-secondary">Medical</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endmacro %}
+
+{# ── Needs Certification ── #}
+{% if pending_certs %}
+    <h6 class="text-warning fw-semibold mb-2">
+        Needs Certification
+        <span class="badge bg-warning text-dark ms-1">{{ pending_certs | length }}</span>
+    </h6>
+
+    <div class="d-flex align-items-center gap-2 mb-2">
+        <button id="analyzeSelectedBtn" class="btn btn-sm btn-primary"
+                onclick="runWeeklyAnalysis()" disabled>
+            Analyze Selected
+        </button>
+        <span class="text-muted small">
+            Defaults to certs from the past 7 days. Use the checkboxes to refine the set.
+        </span>
+    </div>
+    <div id="analysisPanel" class="mb-3" style="display:none"></div>
+
+    {{ cert_table(pending_certs, selectable=True) }}
+{% else %}
+    <div class="alert alert-success mb-3">&#10003; No certifications pending review for {{ selected }}.</div>
+{% endif %}
+
+{# ── Previously Certified ── #}
+{% if certified_certs %}
+<div class="mt-3">
+    <button class="btn btn-sm btn-outline-secondary" type="button"
+            data-bs-toggle="collapse" data-bs-target="#certified-section"
+            aria-expanded="false">
+        Previously Certified
+        <span class="badge bg-secondary ms-1">{{ certified_certs | length }}</span>
+    </button>
+    <div class="collapse mt-2" id="certified-section">
+        {{ cert_table(certified_certs) }}
+    </div>
+</div>
+{% endif %}
+
+{% if not pending_certs and not certified_certs %}
+<div class="alert alert-secondary">No certifications found for {{ selected }} in the last 60 days.</div>
+{% endif %}
+
+{% if pending_certs %}
+<script>
+function selectedCertIds() {
+    return Array.from(document.querySelectorAll('.cert-checkbox:checked'))
+        .map(cb => parseInt(cb.value, 10));
+}
+
+function updateAnalyzeButton() {
+    var n = selectedCertIds().length;
+    var btn = document.getElementById('analyzeSelectedBtn');
+    btn.disabled = n === 0;
+    btn.textContent = n === 0 ? 'Analyze Selected' : 'Analyze Selected (' + n + ')';
+
+    // Sync the header "select all" checkbox state.
+    var boxes = document.querySelectorAll('.cert-checkbox');
+    var checked = document.querySelectorAll('.cert-checkbox:checked');
+    var selectAll = document.getElementById('selectAllCerts');
+    if (selectAll) {
+        selectAll.checked = boxes.length > 0 && checked.length === boxes.length;
+        selectAll.indeterminate = checked.length > 0 && checked.length < boxes.length;
+    }
+}
+
+function toggleAllCerts(checked) {
+    document.querySelectorAll('.cert-checkbox').forEach(cb => { cb.checked = checked; });
+    updateAnalyzeButton();
+}
+
+function autoSelectRecentCerts() {
+    // Default: select every pending cert with an alert in the past 7 days.
+    var cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    document.querySelectorAll('.cert-checkbox').forEach(cb => {
+        var iso = cb.dataset.alert;
+        if (iso && new Date(iso) >= cutoff) {
+            cb.checked = true;
+        }
+    });
+    updateAnalyzeButton();
+}
+
+function escapeHTML(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function renderAnalysisResult(data) {
+    var panel = document.getElementById('analysisPanel');
+    var s = data.summary || {};
+    var parts = [];
+    if (s.ready) parts.push('<span class="badge bg-success me-1">' + s.ready + ' READY</span>');
+    if (s.review) parts.push('<span class="badge bg-warning text-dark me-1">' + s.review + ' REVIEW</span>');
+    if (s.errors) parts.push('<span class="badge bg-danger me-1">' + s.errors + ' ERROR</span>');
+
+    var html = '<div class="card"><div class="card-body py-3">';
+    html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+    html += '<div>' + parts.join(' ') +
+            ' <span class="text-muted small">(' + (s.total || 0) + ' cert' +
+            ((s.total === 1) ? '' : 's') + ' analyzed)</span></div>';
+    html += '<button type="button" class="btn-close" onclick="closeAnalysisPanel()" aria-label="Close"></button>';
+    html += '</div>';
+
+    html += '<div class="table-responsive"><table class="table table-sm table-borderless mb-0 small">';
+    html += '<thead class="text-muted"><tr>' +
+            '<th>Cert</th><th>Alert</th><th class="text-center">Verdict</th><th>Insights</th>' +
+            '</tr></thead><tbody>';
+    (data.certs || []).forEach(function (r) {
+        html += '<tr>';
+        html += '<td><a href="/cert/' + r.cert_id + '" class="text-decoration-none">' + r.cert_id + '</a></td>';
+        if (r.error) {
+            html += '<td colspan="3"><span class="text-danger">' + escapeHTML(r.error) + '</span></td>';
+        } else {
+            var alertStr = r.alert ? r.alert.substring(0, 16).replace('T', ' ') : '—';
+            var verdictBadge = r.verdict === 'READY'
+                ? '<span class="badge bg-success">READY</span>'
+                : '<span class="badge bg-warning text-dark">REVIEW</span>';
+            html += '<td class="font-monospace">' + alertStr + '</td>';
+            html += '<td class="text-center">' + verdictBadge + '</td>';
+            html += '<td class="text-muted">' + escapeHTML(r.insights) + '</td>';
+        }
+        html += '</tr>';
+    });
+    html += '</tbody></table></div></div></div>';
+
+    panel.innerHTML = html;
+    panel.style.display = '';
+    panel.scrollIntoView({behavior: 'smooth', block: 'start'});
+}
+
+function closeAnalysisPanel() {
+    var panel = document.getElementById('analysisPanel');
+    panel.style.display = 'none';
+    panel.innerHTML = '';
+}
+
+function runWeeklyAnalysis() {
+    var ids = selectedCertIds();
+    if (!ids.length) return;
+
+    var btn = document.getElementById('analyzeSelectedBtn');
+    btn.disabled = true;
+    btn.textContent = 'Analyzing ' + ids.length + ' cert(s)…';
+
+    fetch('/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cert_ids: ids}),
+    })
+        .then(r => r.json())
+        .then(function (data) {
+            if (data.error) {
+                var panel = document.getElementById('analysisPanel');
+                panel.innerHTML = '<div class="alert alert-danger mb-0">' + escapeHTML(data.error) + '</div>';
+                panel.style.display = '';
+            } else {
+                renderAnalysisResult(data);
+            }
+        })
+        .catch(function (err) {
+            var panel = document.getElementById('analysisPanel');
+            panel.innerHTML = '<div class="alert alert-danger mb-0">Request failed: ' + escapeHTML(err.message || err) + '</div>';
+            panel.style.display = '';
+        })
+        .finally(function () {
+            updateAnalyzeButton();
+        });
+}
+
+document.addEventListener('DOMContentLoaded', autoSelectRecentCerts);
+</script>
+{% endif %}
+
+{% if kaiser_matrix %}
+<script>
+function kaiserCertIds() {
+    return Array.from(document.querySelectorAll('.kaiser-verdict-slot[data-cert-id]'))
+        .map(el => parseInt(el.dataset.certId, 10))
+        .filter(n => Number.isFinite(n));
+}
+
+function setSlotVerdict(slot, verdict, insights, error) {
+    var span = document.createElement('span');
+    if (error) {
+        span.className = 'badge bg-danger';
+        span.textContent = 'ERROR';
+        span.title = error;
+    } else if (verdict === 'READY') {
+        span.className = 'badge bg-success';
+        span.textContent = 'READY';
+        if (insights) span.title = insights;
+    } else {
+        span.className = 'badge bg-warning text-dark';
+        span.textContent = 'REVIEW';
+        if (insights) span.title = insights;
+    }
+    slot.innerHTML = '';
+    slot.appendChild(span);
+}
+
+function runKaiserAnalysis() {
+    var ids = kaiserCertIds();
+    if (!ids.length) return;
+    var btn = document.getElementById('kaiserAnalyzeBtn');
+    btn.disabled = true;
+    btn.textContent = 'Analyzing ' + ids.length + '…';
+
+    fetch('/analyze', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({cert_ids: ids}),
+    })
+        .then(r => r.json())
+        .then(function (data) {
+            (data.certs || []).forEach(function (r) {
+                var slot = document.querySelector(
+                    '.kaiser-verdict-slot[data-cert-id="' + r.cert_id + '"]'
+                );
+                if (slot) setSlotVerdict(slot, r.verdict, r.insights, r.error);
+            });
+            btn.textContent = 'Re-run analysis';
+        })
+        .catch(function (err) {
+            btn.textContent = 'Analyze All Loaded';
+            alert('Kaiser analysis failed: ' + (err.message || err));
+        })
+        .finally(function () {
+            btn.disabled = kaiserCertIds().length === 0;
+        });
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    var n = kaiserCertIds().length;
+    var btn = document.getElementById('kaiserAnalyzeBtn');
+    if (btn) {
+        btn.disabled = n === 0;
+        if (n) btn.textContent = 'Analyze All Loaded (' + n + ')';
+    }
+});
+</script>
+{% endif %}
+
+{% endif %}
+{% endblock %}

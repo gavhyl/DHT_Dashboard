@@ -14,6 +14,7 @@ from waitress import serve
 
 from app import app
 import ramp
+import delivery_status
 
 
 def _warm_caches():
@@ -34,6 +35,13 @@ def _warm_caches():
         ramp.get_kaiser_delivery_tickets()
     except Exception as e:
         print(f"  Kaiser ADO warm failed: {e!r}", flush=True)
+    # The delivery-status calendar is the most expensive cold build (a storm of
+    # sqlcmd/curl calls across DHT/RAMP/ADO/ETL). Warming it here keeps the
+    # first home-page hit fast; it stays cached for the rest of the day.
+    try:
+        delivery_status.get_calendar_html()
+    except Exception as e:
+        print(f"  Delivery-status calendar warm failed: {e!r}", flush=True)
     print(f"  done in {(time.perf_counter() - start):.1f}s", flush=True)
 
 

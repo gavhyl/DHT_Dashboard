@@ -1,11 +1,12 @@
 from concurrent.futures import ThreadPoolExecutor
 
-from flask import Flask, render_template, abort, request, redirect, url_for, jsonify
+from flask import Flask, render_template, abort, request, redirect, url_for, jsonify, Response
 import db
 import ramp
 import file_loads
 import rx_verify
 import analysis
+import delivery_status
 
 # Cap the analyze-batch worker pool. Each worker runs the full per-cert
 # pipeline (10+ DB round trips). 8 strikes a balance between batch latency
@@ -66,6 +67,24 @@ def index():
         kaiser_matrix=kaiser_matrix, kaiser_ticket=kaiser_ticket,
         kaiser_coverage=kaiser_coverage,
     )
+
+
+@app.route("/delivery-status")
+def delivery_status_page():
+    """Serve the vendored Client Delivery Status calendar as a standalone HTML
+    document. The home page embeds this via a de-chromed iframe (no client
+    selected). Cached for the day in delivery_status.get_calendar_html()."""
+    try:
+        html = delivery_status.get_calendar_html()
+    except Exception as e:
+        # Never 500 the iframe — show a readable message inside the panel.
+        html = (
+            "<!doctype html><html><body style=\"font-family:Segoe UI,sans-serif;"
+            "padding:24px;color:#9C0006;\"><h3>Delivery status calendar unavailable</h3>"
+            f"<p>The calendar could not be built right now.</p><pre style=\"white-space:"
+            f"pre-wrap;color:#555;\">{str(e)}</pre></body></html>"
+        )
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/cert/<int:cert_id>")

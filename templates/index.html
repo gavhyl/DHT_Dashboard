@@ -27,6 +27,18 @@
     </div>
 </div>
 
+{% if not selected %}
+{# ── Client Delivery Status calendar ──
+   Embedded as a de-chromed iframe so the vendored, self-contained dashboard
+   (its own CSS/JS, sticky month tabs + search) is fully isolated from this
+   app's Bootstrap styles. This is the default landing view; picking a client
+   from the dropdown above swaps it for that client's cert review below. #}
+<iframe src="/delivery-status" title="Client Delivery Status calendar"
+        loading="lazy"
+        style="width:100%; height:calc(100vh - 190px); min-height:600px;
+               border:0; display:block; background:#212529;"></iframe>
+{% endif %}
+
 {% if selected %}
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h6 class="mb-0">
